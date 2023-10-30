@@ -4,7 +4,7 @@ use shuttle_actix_web::ShuttleActixWeb;
 
 #[get("/")]
 async fn index() -> impl Responder {
-    NamedFile::open_async("assets/index.html").await
+    NamedFile::open_async("static/index.html").await
 }
 
 #[shuttle_runtime::main]
