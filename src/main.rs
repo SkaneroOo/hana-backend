@@ -1,10 +1,15 @@
 use actix_files::{Files, NamedFile};
-use actix_web::{get, web::ServiceConfig, Responder};
+use actix_web::{get, web::ServiceConfig, Responder, head, HttpResponse};
 use shuttle_actix_web::ShuttleActixWeb;
 
 #[get("/index")]
 async fn index() -> impl Responder {
     NamedFile::open_async("static/index.html").await
+}
+
+#[head("/")]
+async fn example() -> HttpResponse {
+    HttpResponse::Ok().finish()
 }
 
 #[shuttle_runtime::main]
