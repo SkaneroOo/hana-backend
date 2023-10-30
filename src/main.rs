@@ -1,21 +1,17 @@
-use rocket::fs::NamedFile;
-use rocket::fs::{relative};
-use std::path::{Path, PathBuf};
+use actix_files::NamedFile;
+use actix_web::{get, web::ServiceConfig, Responder};
+use shuttle_actix_web::ShuttleActixWeb;
 
-#[rocket::get("/<path..>")]
-pub async fn serve(mut path: PathBuf) -> Option<NamedFile> {
-    path.set_extension("html");
-    let mut path = Path::new(relative!("assets")).join(path);
-    if path.is_dir() {
-        path.push("index.html");
-    }
-
-    NamedFile::open(path).await.ok()
+#[get("/")]
+async fn index() -> impl Responder {
+    NamedFile::open_async("assets/index.html").await
 }
 
 #[shuttle_runtime::main]
-async fn rocket() -> shuttle_rocket::ShuttleRocket {
-    let rocket = rocket::build().mount("/", rocket::routes![serve]);
+async fn actix_web() -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
+    let config = move |cfg: &mut ServiceConfig| {
+        cfg.service(index);
+    };
 
-    Ok(rocket.into())
+    Ok(config.into())
 }
