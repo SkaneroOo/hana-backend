@@ -8,7 +8,7 @@ async fn index() -> impl Responder {
 }
 
 #[head("/")]
-async fn example() -> HttpResponse {
+async fn uptime() -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
@@ -17,6 +17,7 @@ async fn example() -> HttpResponse {
 async fn actix_web() -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
     let config = move |cfg: &mut ServiceConfig| {
         cfg.service(index);
+        cfg.service(uptime);
         cfg.service(Files::new("/", "static")
             .show_files_listing()
             .index_file("index.html")
