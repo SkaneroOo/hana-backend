@@ -1,1 +1,3 @@
 target/
+Secrets*.toml
+hana.db
