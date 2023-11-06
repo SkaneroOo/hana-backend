@@ -83,11 +83,8 @@ async fn actix_web(
 
         cfg.app_data(data);
         cfg.service(index);
-<<<<<<< HEAD
         cfg.service(uptime);
-=======
         cfg.service(login);
->>>>>>> 19e5c779ca5c0d7c687af9be484c8d38bb5d9948
         cfg.service(Files::new("/", "static")
             .show_files_listing()
             .index_file("index.html")
