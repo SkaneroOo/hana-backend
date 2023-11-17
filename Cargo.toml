@@ -19,3 +19,4 @@ shuttle-turso = "0.31.0"
 libsql-client = "0.31.11"
 shuttle-secrets = "0.31.0"
 shuttle-service = "0.31.0"
+reqwest = { version = "0.11.22", features = ["json"] }
