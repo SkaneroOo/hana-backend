@@ -22,6 +22,7 @@ use serde::{
     Deserialize,
     Serialize
 };
+#[allow(unused_imports)]
 use serde_json::{
     to_string,
     Value
@@ -80,14 +81,15 @@ struct AccessTokenResponse {
 }
 
 #[get("/oauth")]
-async fn oauth2_redirect(data: web::Query<Oauth2Data>, secrets: web::Data<SecretStore>) -> HttpResponse {
-
+async fn oauth2_redirect(req: HttpRequest, data: web::Query<Oauth2Data>, secrets: web::Data<SecretStore>) -> HttpResponse {
+    dbg!(req.connection_info().host());
     println!("oauth2_redirect: {data:?}");
     let client = reqwest::Client::new();
     let mut form_data = HashMap::new();
     form_data.insert("grant_type", "authorization_code");
     form_data.insert("code", &data.code);
-    form_data.insert("redirect_uri", "https://foxhound-sincere-rarely.ngrok-free.app/oauth");
+    let host = format!("https://{}/oauth", req.connection_info().host());
+    form_data.insert("redirect_uri", &host);
     let recieved = client.post("https://discord.com/api/v10/oauth2/token")
           .form(&form_data)
           .basic_auth(secrets.get("DISCORD_CLIENT_ID").expect("missing DISCORD_CLIENT_ID"), secrets.get("DISCORD_APP_SECRET"))
@@ -99,8 +101,10 @@ async fn oauth2_redirect(data: web::Query<Oauth2Data>, secrets: web::Data<Secret
                                    .max_age(Duration::seconds(recieved.expires_in)).finish();
     let refresh_cookie = Cookie::build("refresh_token", recieved.refresh_token).permanent().finish();
     
+    // HttpResponse::TemporaryRedirect()
 
-    HttpResponse::Ok()
+    HttpResponse::PermanentRedirect()
+        .append_header(("Location", "/"))
         .cookie(token_cookie)
         .cookie(refresh_cookie)
         .finish()
@@ -108,6 +112,7 @@ async fn oauth2_redirect(data: web::Query<Oauth2Data>, secrets: web::Data<Secret
 
 #[derive(Debug, Serialize, Deserialize)]
 struct UserData {
+    #[serde(rename(deserialize = "global_name"))]
     username: String,
     avatar: String
 }
@@ -121,10 +126,10 @@ struct UserDataResponse {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct AuthorizationInformation {
-    application: Value,
-    scopes: Vec<String>,
-    expires: String,
-    user: Value
+    // application: Value,
+    // scopes: Vec<String>,
+    // expires: String,
+    user: UserData
 }
 
 #[get("/get-user")]
@@ -132,7 +137,6 @@ async fn get_user(req: HttpRequest, secrets: web::Data<SecretStore>) -> HttpResp
 
     let mut response = HttpResponse::Ok();
     response.append_header(("Access-Control-Allow-Origin", "*"));
-    response.content_type(ContentType::json());
 
     let client = reqwest::Client::new();
 
@@ -152,9 +156,9 @@ async fn get_user(req: HttpRequest, secrets: web::Data<SecretStore>) -> HttpResp
                         .basic_auth(secrets.get("DISCORD_CLIENT_ID").expect("missing DISCORD_CLIENT_ID"), secrets.get("DISCORD_APP_SECRET"))
                         .send().await.expect("failed to send request").json::<AccessTokenResponse>().await.expect("unable to parse response");
                     
-                        let token_cookie = Cookie::build("access_token", recieved.access_token)
-                                                       .max_age(Duration::seconds(recieved.expires_in)).finish();
-                        let refresh_cookie = Cookie::build("refresh_token", recieved.refresh_token).permanent().finish();
+                    let token_cookie = Cookie::build("access_token", recieved.access_token)
+                                                    .max_age(Duration::seconds(recieved.expires_in)).finish();
+                    let refresh_cookie = Cookie::build("refresh_token", recieved.refresh_token).permanent().finish();
 
                     cookies.push(token_cookie.clone());
                     cookies.push(refresh_cookie);
@@ -167,7 +171,8 @@ async fn get_user(req: HttpRequest, secrets: web::Data<SecretStore>) -> HttpResp
                         message: Some("User not logged in".to_string()),
                         user: None
                     };
-                    return response.body(to_string(&response_body).unwrap_or_else(|_| unreachable!()))
+                    // return response.body(to_string(&response_body).unwrap_or_else(|_| unreachable!()))
+                    return response.json(response_body)
                 }
             }
         }
@@ -183,7 +188,13 @@ async fn get_user(req: HttpRequest, secrets: web::Data<SecretStore>) -> HttpResp
         response.cookie(cookie);
     }
 
-    response.body(to_string(&data).unwrap_or_else(|_| unreachable!()))
+    let resp_data = UserDataResponse {
+        status: "Ok".to_string(),
+        message: None,
+        user: Some(data.user)
+    };
+    response.json(resp_data)
+    // response.body(to_string(&resp_data).unwrap_or_else(|_| unreachable!()))
 }
 
 // #[derive(Clone)]
