@@ -1,7 +1,4 @@
-use actix_files::{
-    Files, 
-    NamedFile
-};
+use actix_files::Files;
 use actix_web::{
     cookie::{Cookie, time::Duration},
     head,
@@ -10,7 +7,6 @@ use actix_web::{
     HttpResponse,
     get,
     post,
-    Responder,
     web::{
         self,
         ServiceConfig
@@ -26,7 +22,10 @@ use serde::{
     Deserialize,
     Serialize
 };
-use serde_json::Value;
+use serde_json::{
+    to_string,
+    Value
+};
 use shuttle_actix_web::ShuttleActixWeb;
 use shuttle_secrets::SecretStore;
 use std::collections::HashMap;
@@ -40,7 +39,7 @@ struct LoginData {
 
 
 #[head("/")]
-async fn uptime(req: HttpRequest) -> HttpResponse {
+async fn uptime(_req: HttpRequest) -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
@@ -67,7 +66,8 @@ async fn login(mut body: web::Payload) -> HttpResponse {
 #[derive(Deserialize, Debug)]
 struct Oauth2Data {
     code: String,
-    _state: Option<String>
+    #[allow(dead_code)]
+    state: Option<String>
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -87,11 +87,12 @@ async fn oauth2_redirect(data: web::Query<Oauth2Data>, secrets: web::Data<Secret
     let mut form_data = HashMap::new();
     form_data.insert("grant_type", "authorization_code");
     form_data.insert("code", &data.code);
-    form_data.insert("redirect_uri", "https://c6b1-46-204-108-193.ngrok-free.app/oauth");
+    form_data.insert("redirect_uri", "https://foxhound-sincere-rarely.ngrok-free.app/oauth");
     let recieved = client.post("https://discord.com/api/v10/oauth2/token")
           .form(&form_data)
           .basic_auth(secrets.get("DISCORD_CLIENT_ID").expect("missing DISCORD_CLIENT_ID"), secrets.get("DISCORD_APP_SECRET"))
-          .send().await.expect("failed to send request").json::<AccessTokenResponse>().await.expect("failed to parse response json");
+          .send().await.expect("failed to send request").json::<AccessTokenResponse>().await.expect("unable to parse response");
+
     println!("recieved: {recieved:?}");
 
     let token_cookie = Cookie::build("access_token", recieved.access_token)
@@ -103,6 +104,86 @@ async fn oauth2_redirect(data: web::Query<Oauth2Data>, secrets: web::Data<Secret
         .cookie(token_cookie)
         .cookie(refresh_cookie)
         .finish()
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UserData {
+    username: String,
+    avatar: String
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UserDataResponse {
+    status: String,
+    message: Option<String>,
+    user: Option<UserData>
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct AuthorizationInformation {
+    application: Value,
+    scopes: Vec<String>,
+    expires: String,
+    user: Value
+}
+
+#[get("/get-user")]
+async fn get_user(req: HttpRequest, secrets: web::Data<SecretStore>) -> HttpResponse {
+
+    let mut response = HttpResponse::Ok();
+    response.append_header(("Access-Control-Allow-Origin", "*"));
+    response.content_type(ContentType::json());
+
+    let client = reqwest::Client::new();
+
+    let mut cookies = vec![];
+
+    let user_token = match req.cookie("access_token") {
+        Some(cookie) => cookie,
+        None => {
+            match req.cookie("refresh_token") {
+                Some(cookie) => {
+                    let mut form_data = HashMap::new();
+                    form_data.insert("grant_type", "refresh_token");
+                    form_data.insert("refresh_token", cookie.value());
+                    
+                    let recieved = client.post("https://discord.com/api/v10/oauth2/token")
+                        .form(&form_data)
+                        .basic_auth(secrets.get("DISCORD_CLIENT_ID").expect("missing DISCORD_CLIENT_ID"), secrets.get("DISCORD_APP_SECRET"))
+                        .send().await.expect("failed to send request").json::<AccessTokenResponse>().await.expect("unable to parse response");
+                    
+                        let token_cookie = Cookie::build("access_token", recieved.access_token)
+                                                       .max_age(Duration::seconds(recieved.expires_in)).finish();
+                        let refresh_cookie = Cookie::build("refresh_token", recieved.refresh_token).permanent().finish();
+
+                    cookies.push(token_cookie.clone());
+                    cookies.push(refresh_cookie);
+
+                    token_cookie
+                },
+                None => {
+                    let response_body = UserDataResponse {
+                        status: "Error".to_string(),
+                        message: Some("User not logged in".to_string()),
+                        user: None
+                    };
+                    return response.body(to_string(&response_body).unwrap_or_else(|_| unreachable!()))
+                }
+            }
+        }
+    };
+
+    let data = client.get("https://discord.com/api/v10/oauth2/@me")
+        .header("Authorization", format!("Bearer {}", user_token.value()))
+        .send().await.expect("cannot send request").json::<AuthorizationInformation>().await.expect("cannot parse recieved data");
+
+    println!("{data:?}");
+
+    for cookie in cookies {
+        response.cookie(cookie);
+    }
+
+    response.body(to_string(&data).unwrap_or_else(|_| unreachable!()))
 }
 
 // #[derive(Clone)]
@@ -141,6 +222,7 @@ async fn actix_web(
         cfg.service(uptime);
         cfg.service(login);
         cfg.service(oauth2_redirect);
+        cfg.service(get_user);
         cfg.service(Files::new("/", "static")
             .show_files_listing()
             .index_file("index.html")
