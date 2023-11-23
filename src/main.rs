@@ -199,7 +199,6 @@ async fn setup(database: &Client) {
 }
 
 #[shuttle_runtime::main]
-#[allow(clippy::unused_async)]
 async fn actix_web(
     #[shuttle_secrets::Secrets] secrets: SecretStore,
     #[shuttle_turso::Turso(
