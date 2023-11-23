@@ -1,23 +1,21 @@
+#![allow(clippy::future_not_send)]
+
 use actix_files::Files;
 use actix_web::{
     cookie::{Cookie, time::Duration},
     head,
-    http::header::ContentType,
     HttpRequest,
     HttpResponse,
     get,
-    post,
     web::{
         self,
         ServiceConfig
     }
 };
-use futures::StreamExt;
 use libsql_client::{
     // args,
     Client
 };
-use reqwest;
 use serde::{
     Deserialize,
     Serialize
@@ -44,24 +42,12 @@ async fn uptime(_req: HttpRequest) -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
-#[post("/login")]
-async fn login(mut body: web::Payload) -> HttpResponse {
+#[get("/login")]
+async fn login(req: HttpRequest) -> HttpResponse {
 
-    let mut bytes = web::BytesMut::new();
-    while let Some(item) = body.next().await {
-        bytes.extend_from_slice(&item.unwrap());
-    }
-
-    let data: LoginData = serde_json::from_slice(&bytes).unwrap();
-
-    if data.username == "hoge" {
-        return HttpResponse::Unauthorized().finish();
-    }
-
-    HttpResponse::Ok()
-        .content_type(ContentType::json())
-        .append_header(("Access-Control-Allow-Origin", "*"))
-        .body(format!(r#"{{"username": "{}"}}"#, data.username))
+    HttpResponse::PermanentRedirect()
+    .append_header(("Location", format!("https://discord.com/api/oauth2/authorize?client_id=1170384464476639272&redirect_uri=https%3A%2F%2F{}%2Foauth&response_type=code&scope=identify%20email", req.connection_info().host())))
+    .finish()
 }
 
 #[derive(Deserialize, Debug)]
@@ -112,6 +98,7 @@ async fn oauth2_redirect(req: HttpRequest, data: web::Query<Oauth2Data>, secrets
 
 #[derive(Debug, Serialize, Deserialize)]
 struct UserData {
+    id: String,
     #[serde(rename(deserialize = "global_name"))]
     username: String,
     avatar: String
@@ -145,6 +132,7 @@ async fn get_user(req: HttpRequest, secrets: web::Data<SecretStore>) -> HttpResp
     let user_token = match req.cookie("access_token") {
         Some(cookie) => cookie,
         None => {
+            #[allow(clippy::single_match_else)]
             match req.cookie("refresh_token") {
                 Some(cookie) => {
                     let mut form_data = HashMap::new();
@@ -205,7 +193,7 @@ async fn get_user(req: HttpRequest, secrets: web::Data<SecretStore>) -> HttpResp
 async fn setup(database: &Client) {
     let tx = database.transaction().await.expect("Cannot create transaction");
 
-    tx.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT, email TEXT, discord_id TEXT)").await.unwrap();
+    tx.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT, discord_id TEXT)").await.expect("Cannot create table");
 
     tx.commit().await.expect("Cannot commit transaction");
 }
