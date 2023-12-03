@@ -12,10 +12,7 @@ use actix_web::{
     HttpRequest,
     HttpResponse,
     get,
-    web::{
-        self,
-        ServiceConfig
-    }
+    web
 };
 use dotenv::dotenv;
 use libsql_client::{
@@ -228,7 +225,7 @@ async fn main() -> Result<(), std::io::Error>{
 
     let client = Client::from_config(Config {
         url: url::Url::parse(&secrets.db_url).expect("Cannot parse database url"),
-        auth_token: Some((&secrets.db_token).to_string())
+        auth_token: Some(secrets.db_token.to_string())
     }).await.expect("Cannot create database client");
     
     setup(&client).await;
