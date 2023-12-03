@@ -2,8 +2,13 @@
 
 use actix_files::Files;
 use actix_web::{
-    cookie::{Cookie, time::Duration},
+    App,
+    cookie::{
+        Cookie, 
+        time::Duration
+    },
     head,
+    HttpServer,
     HttpRequest,
     HttpResponse,
     get,
@@ -12,9 +17,10 @@ use actix_web::{
         ServiceConfig
     }
 };
+use dotenv::dotenv;
 use libsql_client::{
-    // args,
-    Client
+    Client, 
+    Config
 };
 use serde::{
     Deserialize,
@@ -25,9 +31,11 @@ use serde_json::{
     to_string,
     Value
 };
-use shuttle_actix_web::ShuttleActixWeb;
-use shuttle_secrets::SecretStore;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    env, 
+    sync::Mutex
+};
 
 // temp discord oauth url https://discord.com/api/oauth2/authorize?client_id=1170384464476639272&redirect_uri=https%3A%2F%2Ffoxhound-sincere-rarely.ngrok-free.app%2Foauth&response_type=code&scope=identify%20email
 
@@ -67,7 +75,7 @@ struct AccessTokenResponse {
 }
 
 #[get("/oauth")]
-async fn oauth2_redirect(req: HttpRequest, data: web::Query<Oauth2Data>, secrets: web::Data<SecretStore>) -> HttpResponse {
+async fn oauth2_redirect(req: HttpRequest, data: web::Query<Oauth2Data>, secrets: web::Data<Secrets>) -> HttpResponse {
     dbg!(req.connection_info().host());
     println!("oauth2_redirect: {data:?}");
     let client = reqwest::Client::new();
@@ -78,7 +86,7 @@ async fn oauth2_redirect(req: HttpRequest, data: web::Query<Oauth2Data>, secrets
     form_data.insert("redirect_uri", &host);
     let recieved = client.post("https://discord.com/api/v10/oauth2/token")
           .form(&form_data)
-          .basic_auth(secrets.get("DISCORD_CLIENT_ID").expect("missing DISCORD_CLIENT_ID"), secrets.get("DISCORD_APP_SECRET"))
+          .basic_auth(&secrets.discord_client_id, Some(&secrets.discord_app_secret))
           .send().await.expect("failed to send request").json::<AccessTokenResponse>().await.expect("unable to parse response");
 
     println!("recieved: {recieved:?}");
@@ -119,8 +127,9 @@ struct AuthorizationInformation {
     user: UserData
 }
 
+
 #[get("/get-user")]
-async fn get_user(req: HttpRequest, secrets: web::Data<SecretStore>) -> HttpResponse {
+async fn get_user(req: HttpRequest, secrets: web::Data<Secrets>) -> HttpResponse {
 
     let mut response = HttpResponse::Ok();
     response.append_header(("Access-Control-Allow-Origin", "*"));
@@ -141,7 +150,7 @@ async fn get_user(req: HttpRequest, secrets: web::Data<SecretStore>) -> HttpResp
                     
                     let recieved = client.post("https://discord.com/api/v10/oauth2/token")
                         .form(&form_data)
-                        .basic_auth(secrets.get("DISCORD_CLIENT_ID").expect("missing DISCORD_CLIENT_ID"), secrets.get("DISCORD_APP_SECRET"))
+                        .basic_auth(&secrets.discord_client_id, Some(&secrets.discord_app_secret))
                         .send().await.expect("failed to send request").json::<AccessTokenResponse>().await.expect("unable to parse response");
                     
                     let token_cookie = Cookie::build("access_token", recieved.access_token)
@@ -198,37 +207,52 @@ async fn setup(database: &Client) {
     tx.commit().await.expect("Cannot commit transaction");
 }
 
-#[shuttle_runtime::main]
-async fn actix_web(
-    #[shuttle_secrets::Secrets] secrets: SecretStore,
-    #[shuttle_turso::Turso(
-        addr="{secrets.DB_TURSO_URL}",
-        token="{secrets.DB_TURSO_TOKEN}")] client: Client,
-) -> ShuttleActixWeb<impl FnOnce(&mut ServiceConfig) + Send + Clone + 'static> {
-    // let app_state = AppState {
-    //     database: Arc::new(Mutex::new(client))
-    // };
+struct Secrets {
+    db_url: String,
+    db_token: String,
+    discord_client_id: String,
+    discord_app_secret: String
+}
+
+#[actix_web::main]
+async fn main() -> Result<(), std::io::Error>{
+
+    dotenv().ok();
+
+    let secrets = Secrets {
+        db_url: env::var("DB_URL").expect("missing DB_URL"),
+        db_token: env::var("DB_TOKEN").expect("missing DB_TOKEN"),
+        discord_client_id: env::var("DISCORD_CLIENT_ID").expect("missing DISCORD_CLIENT_ID"),
+        discord_app_secret: env::var("DISCORD_APP_SECRET").expect("missing DISCORD_APP_SECRET")
+    };
+
+    let client = Client::from_config(Config {
+        url: url::Url::parse(&secrets.db_url).expect("Cannot parse database url"),
+        auth_token: Some((&secrets.db_token).to_string())
+    }).await.expect("Cannot create database client");
     
     setup(&client).await;
 
-    let data = web::Data::new(client);
-    let secrets_data = web::Data::new(secrets);
-    let config = move |cfg: &mut ServiceConfig| {
+    let data = web::Data::new(Mutex::new(client));
+    let secrets_data = web::Data::new(Mutex::new(secrets));
 
-        cfg.app_data(data);
-        cfg.app_data(secrets_data);
-        cfg.service(uptime);
-        cfg.service(login);
-        cfg.service(oauth2_redirect);
-        cfg.service(get_user);
-        cfg.service(Files::new("/", "static")
-            .show_files_listing()
-            .index_file("index.html")
-            .use_last_modified(true),
-        );
-    };
 
-    
-
-    Ok(config.into())
+    HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::clone(&data))
+            .app_data(web::Data::clone(&secrets_data))
+            .service(uptime)
+            .service(login)
+            .service(oauth2_redirect)
+            .service(get_user)
+            .service(Files::new("/", "static")
+                .show_files_listing()
+                .index_file("index.html")
+                .use_last_modified(true),
+            )
+            .service(Files::new("/css", "static/css"))
+    })
+    .bind(("127.0.0.1", 8080))?
+    .run()
+    .await
 }
