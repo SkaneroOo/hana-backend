@@ -249,7 +249,7 @@ async fn main() -> Result<(), std::io::Error>{
             )
             .service(Files::new("/css", "static/css"))
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("127.0.0.1", env::var("PORT").unwrap_or_else(|_| "8080".to_string()).parse::<u16>().unwrap_or(8080)))?
     .run()
     .await
 }
