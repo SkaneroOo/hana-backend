@@ -234,7 +234,9 @@ async fn main() -> Result<(), std::io::Error>{
     let secrets_data = web::Data::new(Mutex::new(secrets));
 
 
-    HttpServer::new(move || {
+    let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string()).parse::<u16>().unwrap_or(8080);
+
+    let server = match HttpServer::new(move || {
         App::new()
             .app_data(web::Data::clone(&data))
             .app_data(web::Data::clone(&secrets_data))
@@ -249,7 +251,17 @@ async fn main() -> Result<(), std::io::Error>{
             )
             .service(Files::new("/css", "static/css"))
     })
-    .bind(("127.0.0.1", env::var("PORT").unwrap_or_else(|_| "8080".to_string()).parse::<u16>().unwrap_or(8080)))?
-    .run()
+    .bind(("0.0.0.0", port)) {
+        Ok(server) => {
+            println!("Listening on port {port}");
+            server
+        },
+        Err(e) => {
+            eprintln!("Failed to bind to port {port}: {e}");
+            panic!()
+        }
+    };
+
+    server.run()
     .await
 }
